@@ -68,6 +68,16 @@ class SelectorBIC(ModelSelector):
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
 
+    def bic_score(self, n_component):
+        model = self.base_model(n_component)
+        logL = model.score(self.X, self.lengths)
+        logN = np.log(len(self.X))
+        params = (np.square(n_component)) + (2 * model.n_features * n_component) - 1
+
+        bic = -2 * logL + params * logN
+
+        return bic, model
+
     def select(self):
         """ select the best model for self.this_word based on
         BIC score for n between self.min_n_components and self.max_n_components
@@ -76,8 +86,20 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        best_score = float('-inf')
+        best_model = None
+
+        try:
+            for n_component in range(self.min_n_components, self.max_n_components + 1):
+                score, model = self.bic_score(n_component)
+
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+            return best_model
+        except:
+            return self.base_model(self.n_constant)
 
 
 class SelectorDIC(ModelSelector):
@@ -90,11 +112,37 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def dic_score(self, n_component):
+        model = self.base_model(n_component)
+        score = model.score(self.X, self.lengths)
+        scores = []
+
+        for word in self.words:
+            if word != self.this_word:
+                X, lengths = self.hwords[word]
+                score = model.score(X, lengths)
+                scores.append(score)
+
+        return model.score(self.X, lengths) - np.average(scores), model
+
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_score = float('-inf')
+        best_model = None
+
+        try:
+            for n_component in range(self.min_n_components, self.max_n_components + 1):
+                score, model = self.dic_score(n_component)
+
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+            return best_model
+        except:
+            return self.base_model(self.n_constant)
 
 
 class SelectorCV(ModelSelector):
@@ -102,8 +150,35 @@ class SelectorCV(ModelSelector):
 
     '''
 
+    def cv_score(self, n_component):
+        fold_scores = []
+        split_method = KFold(n_splits=min(len(self.sequences), 3))
+
+        for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+            train_X, train_length = combine_sequences(cv_train_idx, self.sequences)
+            hmm_model = GaussianHMM(n_components=n_component, covariance_type="diag", n_iter=1000,
+                    random_state=self.random_state, verbose=False).fit(train_X, train_length)
+            test_X, test_length = combine_sequences(cv_test_idx, self.sequences)
+            logL = hmm_model.score(test_X, test_length)
+            fold_scores.append(logL)
+
+        return np.average(fold_scores), hmm_model
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        best_score = float("-inf")
+        best_model = None
+
+        try:
+            for n_component in range(self.min_n_components, self.max_n_components + 1):
+                score, model = self.cv_score(n_component)
+
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+            return best_model
+        except:
+            return self.base_model(self.n_constant)
+
